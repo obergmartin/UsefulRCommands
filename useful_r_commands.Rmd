@@ -1,0 +1,102 @@
+---
+title: "Useful R Commands"
+author: "Martin Oberg"
+date: "2023-03-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This is a collection of R commands that do useful things
+
+# Reading Data
+
+## Load Multiple JSON Files
+```{r}
+library(purrr)
+library(tidyverse)
+library(jsonlite)
+
+path <- "./your_path"
+files <- dir(path, pattern = "*.json")
+
+# ~fn(.) allows files to be %>%'d into the '.' position
+data <- files %>% map_df(~fromJSON(file.path(path, .), flatten = TRUE))
+# map_df supersceeded? Use purrr::list_rbind instead?
+```
+
+
+
+# Operations Across Rows
+
+## Row Differences
+
+Calculate differences between values.
+```{r}
+df = tibble(ts=c(10, 20, 30, 40))
+# dplyr::lag returns the lagged value, which is subtracted from ts to get the difference
+df %>% dplyr::mutate(d = ts - dplyr::lag(ts, n=1))
+```
+
+
+## Time Differences Across Rows
+
+Here we have timestamped (ts) data with an event trigger and response.
+We want to calculate the time between a trigger and the nearest following target.
+
+This code can most likely be simplified.
+But the step by step should be easy to follow.
+```{r}
+library(tidyverse)
+df = tibble(ts=c(2,4,6,8,10), trigger=c(1,0,1,0,0), response=c(0,1,0,1,1))
+# make groups of triggered events by performing a cumulative sum on trigger
+df <- df %>% mutate(idx=cumsum(trigger))
+df
+```
+First get the rows that contain responses.
+```{r}
+df.responses <- df %>% 
+    # For each trigger group...
+    group_by(idx) %>% 
+    # Find the response
+    filter(response == max(response)) %>% 
+    # make sure there is only 1 response
+    slice_head(n=1) %>% 
+    ungroup()
+df.responses
+```
+
+```{r}
+df.rt <- df %>% 
+    group_by(idx) %>% 
+    # select rows that contain the trigger
+    filter(trigger == max(trigger)) %>% 
+    ungroup() %>% 
+    # combine with df.responses
+    right_join(df.responses, by=join_by(idx)) %>% 
+    mutate(rt = ts.y - ts.x) %>% 
+    select(idx, ts.x, rt) %>% 
+    # keep a record of when the trigger occurred
+    rename(ts=ts.x)
+  
+df.rt
+```
+
+# Conditions Across Columns
+
+## Does a Column Contain a value?
+
+```{r}
+df <- tibble(col1=c('zza', 'zyz', 'zzz'), col2=c('xxa', 'xax', 'xyz'))
+
+# map2_lgl uses col1 and "a" as arguments for str_detect
+df %>%
+    mutate(col1_has_a = map2_lgl(col1, "a", str_detect))
+
+# if_any operates over columns (might need to select columns to be in a particular
+# order if using a subset, or use a tidy_select() command)
+df %>%
+    mutate(col1or2_has_a = if_any(col1:col2, ~ str_detect(., "a")))
+```
